@@ -77,15 +77,15 @@ CREATE or REPLACE TABLE `dataproc-pp-benchmark.tpc_ds_1TB.catalog_returns` (
   cr_reason_sk INT64,
   cr_order_number INT64 NOT NULL,
   cr_return_quantity INT64,
-  cr_return_amount FLOAT64,
-  cr_return_tax FLOAT64,
-  cr_return_amt_inc_tax FLOAT64,
-  cr_fee FLOAT64,
-  cr_return_ship_cost FLOAT64,
-  cr_refunded_cash FLOAT64,
-  cr_reversed_charge FLOAT64,
-  cr_store_credit FLOAT64,
-  cr_net_loss FLOAT64
+  cr_return_amount NUMERIC,
+  cr_return_tax NUMERIC,
+  cr_return_amt_inc_tax NUMERIC,
+  cr_fee NUMERIC,
+  cr_return_ship_cost NUMERIC,
+  cr_refunded_cash NUMERIC,
+  cr_reversed_charge NUMERIC,
+  cr_store_credit NUMERIC,
+  cr_net_loss NUMERIC
 );
 
 
@@ -113,21 +113,21 @@ CREATE or REPLACE TABLE `dataproc-pp-benchmark.tpc_ds_1TB.catalog_sales` (
     cs_promo_sk               INT64,
     cs_order_number           INT64 NOT NULL,
     cs_quantity               INT64,
-    cs_wholesale_cost         FLOAT64,
-    cs_list_price             FLOAT64,
-    cs_sales_price            FLOAT64,
-    cs_ext_discount_amt       FLOAT64,
-    cs_ext_sales_price        FLOAT64,
-    cs_ext_wholesale_cost     FLOAT64,
-    cs_ext_list_price         FLOAT64,
-    cs_ext_tax                FLOAT64,
-    cs_coupon_amt             FLOAT64,
-    cs_ext_ship_cost          FLOAT64,
-    cs_net_paid               FLOAT64,
-    cs_net_paid_inc_tax       FLOAT64,
-    cs_net_paid_inc_ship      FLOAT64,
-    cs_net_paid_inc_ship_tax  FLOAT64,
-    cs_net_profit             FLOAT64
+    cs_wholesale_cost         NUMERIC,
+    cs_list_price             NUMERIC,
+    cs_sales_price            NUMERIC,
+    cs_ext_discount_amt       NUMERIC,
+    cs_ext_sales_price        NUMERIC,
+    cs_ext_wholesale_cost     NUMERIC,
+    cs_ext_list_price         NUMERIC,
+    cs_ext_tax                NUMERIC,
+    cs_coupon_amt             NUMERIC,
+    cs_ext_ship_cost          NUMERIC,
+    cs_net_paid               NUMERIC,
+    cs_net_paid_inc_tax       NUMERIC,
+    cs_net_paid_inc_ship      NUMERIC,
+    cs_net_paid_inc_ship_tax  NUMERIC,
+    cs_net_profit             NUMERIC
 );
 
 
@@ -176,7 +176,7 @@ CREATE or REPLACE TABLE `dataproc-pp-benchmark.tpc_ds_1TB.customer_address` (
     ca_state            	 STRING,
     ca_zip              	 STRING,
     ca_country          	 STRING,
-    ca_gmt_offset       	 FLOAT64, 
+    ca_gmt_offset       	 NUMERIC, 
     ca_location_type     	 STRING
 );
 
@@ -282,8 +282,8 @@ CREATE or REPLACE TABLE `dataproc-pp-benchmark.tpc_ds_1TB.item` (
     i_rec_start_date      DATE,
     i_rec_end_date        DATE,
     i_item_desc           STRING,
-    i_current_price       FLOAT64, 
-    i_wholesale_cost      FLOAT64, 
+    i_current_price       NUMERIC, 
+    i_wholesale_cost      NUMERIC, 
     i_brand_id            INT64,
     i_brand               STRING,
     i_class_id            INT64,
@@ -313,7 +313,7 @@ CREATE or REPLACE TABLE `dataproc-pp-benchmark.tpc_ds_1TB.promotion` (
     p_start_date_sk           INT64, 
     p_end_date_sk             INT64, 
     p_item_sk                 INT64,
-    p_cost                    FLOAT64,
+    p_cost                    NUMERIC,
     p_response_target         INT64,
     p_promo_name              STRING,
     p_channel_dmail           STRING,
@@ -388,8 +388,8 @@ CREATE OR REPLACE TABLE `dataproc-pp-benchmark.tpc_ds_1TB.store` (
     s_state                   STRING,
     s_zip                     STRING,
     s_country                 STRING,
-    s_gmt_offset              FLOAT64, 
-    s_tax_precentage          FLOAT64  
+    s_gmt_offset              NUMERIC, 
+    s_tax_precentage          NUMERIC  
 );
 
 
@@ -411,15 +411,15 @@ CREATE OR REPLACE TABLE `dataproc-pp-benchmark.tpc_ds_1TB.store_returns` (
     sr_reason_sk              INT64,
     sr_ticket_number 		  INT64 NOT NULL, 
     sr_return_quantity        INT64,
-    sr_return_amt             FLOAT64, 
-    sr_return_tax             FLOAT64, 
-    sr_return_amt_inc_tax     FLOAT64, 
-    sr_fee                    FLOAT64, 
-    sr_return_ship_cost       FLOAT64, 
-    sr_refunded_cash          FLOAT64, 
-    sr_reversed_charge        FLOAT64, 
-    sr_store_credit           FLOAT64, 
-    sr_net_loss               FLOAT64  
+    sr_return_amt             NUMERIC, 
+    sr_return_tax             NUMERIC, 
+    sr_return_amt_inc_tax     NUMERIC, 
+    sr_fee                    NUMERIC, 
+    sr_return_ship_cost       NUMERIC, 
+    sr_refunded_cash          NUMERIC, 
+    sr_reversed_charge        NUMERIC, 
+    sr_store_credit           NUMERIC, 
+    sr_net_loss               NUMERIC  
 );
 
 
@@ -439,18 +439,18 @@ CREATE OR REPLACE TABLE `dataproc-pp-benchmark.tpc_ds_1TB.store_sales` (
     ss_promo_sk               INT64,
     ss_ticket_number          INT64 NOT NULL, 
     ss_quantity               INT64,
-    ss_wholesale_cost         FLOAT64, 
-    ss_list_price             FLOAT64, 
-    ss_sales_price            FLOAT64, 
-    ss_ext_discount_amt       FLOAT64, 
-    ss_ext_sales_price        FLOAT64, 
-    ss_ext_wholesale_cost     FLOAT64, 
-    ss_ext_list_price         FLOAT64, 
-    ss_ext_tax                FLOAT64, 
-    ss_coupon_amt             FLOAT64, 
-    ss_net_paid               FLOAT64, 
-    ss_net_paid_inc_tax       FLOAT64, 
-    ss_net_profit             FLOAT64  
+    ss_wholesale_cost         NUMERIC, 
+    ss_list_price             NUMERIC, 
+    ss_sales_price            NUMERIC, 
+    ss_ext_discount_amt       NUMERIC, 
+    ss_ext_sales_price        NUMERIC, 
+    ss_ext_wholesale_cost     NUMERIC, 
+    ss_ext_list_price         NUMERIC, 
+    ss_ext_tax                NUMERIC, 
+    ss_coupon_amt             NUMERIC, 
+    ss_net_paid               NUMERIC, 
+    ss_net_paid_inc_tax       NUMERIC, 
+    ss_net_profit             NUMERIC  
 );
 
 
@@ -492,7 +492,7 @@ w_county                  STRING,
 w_state                   STRING,
 w_zip                     STRING,
 w_country                 STRING,
-w_gmt_offset              FLOAT64
+w_gmt_offset              NUMERIC
 );
 
 
@@ -541,15 +541,15 @@ CREATE OR REPLACE TABLE `dataproc-pp-benchmark.tpc_ds_1TB.web_returns` (
     wr_reason_sk INT64,
     wr_order_number INT64 NOT NULL,
     wr_return_quantity INT64,
-    wr_return_amt FLOAT64, 
-    wr_return_tax FLOAT64,
-    wr_return_amt_inc_tax FLOAT64,
-    wr_fee FLOAT64,
-    wr_return_ship_cost FLOAT64,
-    wr_refunded_cash FLOAT64,
-    wr_reversed_charge FLOAT64,
-    wr_account_credit FLOAT64,
-    wr_net_loss FLOAT64 
+    wr_return_amt NUMERIC, 
+    wr_return_tax NUMERIC,
+    wr_return_amt_inc_tax NUMERIC,
+    wr_fee NUMERIC,
+    wr_return_ship_cost NUMERIC,
+    wr_refunded_cash NUMERIC,
+    wr_reversed_charge NUMERIC,
+    wr_account_credit NUMERIC,
+    wr_net_loss NUMERIC 
 );
 
 
@@ -578,21 +578,21 @@ CREATE OR REPLACE TABLE `dataproc-pp-benchmark.tpc_ds_1TB.web_sales` (
     ws_promo_sk               INT64,
     ws_order_number           INT64 NOT NULL,
     ws_quantity               INT64,
-    ws_wholesale_cost         FLOAT64, 
-    ws_list_price             FLOAT64,
-    ws_sales_price            FLOAT64,
-    ws_ext_discount_amt       FLOAT64,
-    ws_ext_sales_price        FLOAT64,
-    ws_ext_wholesale_cost     FLOAT64,
-    ws_ext_list_price         FLOAT64,
-    ws_ext_tax                FLOAT64,
-    ws_coupon_amt             FLOAT64,
-    ws_ext_ship_cost          FLOAT64,
-    ws_net_paid               FLOAT64,
-    ws_net_paid_inc_tax       FLOAT64,
-    ws_net_paid_inc_ship      FLOAT64,
-    ws_net_paid_inc_ship_tax  FLOAT64,
-    ws_net_profit             FLOAT64 
+    ws_wholesale_cost         NUMERIC, 
+    ws_list_price             NUMERIC,
+    ws_sales_price            NUMERIC,
+    ws_ext_discount_amt       NUMERIC,
+    ws_ext_sales_price        NUMERIC,
+    ws_ext_wholesale_cost     NUMERIC,
+    ws_ext_list_price         NUMERIC,
+    ws_ext_tax                NUMERIC,
+    ws_coupon_amt             NUMERIC,
+    ws_ext_ship_cost          NUMERIC,
+    ws_net_paid               NUMERIC,
+    ws_net_paid_inc_tax       NUMERIC,
+    ws_net_paid_inc_ship      NUMERIC,
+    ws_net_paid_inc_ship_tax  NUMERIC,
+    ws_net_profit             NUMERIC 
 );
 
 
@@ -627,8 +627,8 @@ CREATE OR REPLACE TABLE `dataproc-pp-benchmark.tpc_ds_1TB.web_site` (
   web_state                 STRING,
   web_zip                   STRING,
   web_country               STRING,
-  web_gmt_offset            FLOAT64,  
-  web_tax_percentage        FLOAT64 
+  web_gmt_offset            NUMERIC,  
+  web_tax_percentage        NUMERIC 
 );
 
 
