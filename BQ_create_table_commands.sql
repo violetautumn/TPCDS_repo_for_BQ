@@ -34,7 +34,7 @@ cc_zip STRING,
 cc_country STRING,
 cc_gmt_offset FLOAT64,
 cc_tax_percentage FLOAT64
-)
+);
 
 
 
