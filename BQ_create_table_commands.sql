@@ -32,8 +32,8 @@ cc_county STRING,
 cc_state STRING,
 cc_zip STRING,
 cc_country STRING,
-cc_gmt_offset FLOAT64,
-cc_tax_percentage FLOAT64
+cc_gmt_offset NUMERIC,
+cc_tax_percentage NUMERIC
 );
 
 
