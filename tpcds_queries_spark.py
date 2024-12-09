@@ -7252,3 +7252,2601 @@ print("Execution time:"+str(end_time-start_time))
 
 
 
+
+
+
+
+
+
+import time
+from pyspark.sql.types import DecimalType
+from pyspark.sql.functions import col
+from pyspark.sql import SparkSession
+
+spark = SparkSession \
+  .builder \
+  .master('yarn') \
+  .appName('spark-bigquery-demo') \
+  .getOrCreate()
+
+
+
+## Query 71
+
+start_time = time.time()
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+catalog_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_sales")
+catalog_salesdf.createOrReplaceTempView("catalog_sales")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+itemdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/item")
+itemdf.createOrReplaceTempView("item")
+time_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/time_dim")
+time_dimdf.createOrReplaceTempView("time_dim")
+
+
+query = """
+
+SELECT i_brand_id     brand_id, 
+       i_brand        brand, 
+       t_hour, 
+       t_minute, 
+       Sum(ext_price) ext_price 
+FROM   item, 
+       (SELECT ws_ext_sales_price AS ext_price, 
+               ws_sold_date_sk    AS sold_date_sk, 
+               ws_item_sk         AS sold_item_sk, 
+               ws_sold_time_sk    AS time_sk 
+        FROM   web_sales, 
+               date_dim 
+        WHERE  d_date_sk = ws_sold_date_sk 
+               AND d_moy = 11 
+               AND d_year = 2001 
+        UNION ALL 
+        SELECT cs_ext_sales_price AS ext_price, 
+               cs_sold_date_sk    AS sold_date_sk, 
+               cs_item_sk         AS sold_item_sk, 
+               cs_sold_time_sk    AS time_sk 
+        FROM   catalog_sales, 
+               date_dim 
+        WHERE  d_date_sk = cs_sold_date_sk 
+               AND d_moy = 11 
+               AND d_year = 2001 
+        UNION ALL 
+        SELECT ss_ext_sales_price AS ext_price, 
+               ss_sold_date_sk    AS sold_date_sk, 
+               ss_item_sk         AS sold_item_sk, 
+               ss_sold_time_sk    AS time_sk 
+        FROM   store_sales, 
+               date_dim 
+        WHERE  d_date_sk = ss_sold_date_sk 
+               AND d_moy = 11 
+               AND d_year = 2001) AS tmp, 
+       time_dim 
+WHERE  sold_item_sk = i_item_sk 
+       AND i_manager_id = 1 
+       AND time_sk = t_time_sk 
+       AND ( t_meal_time = 'breakfast' 
+              OR t_meal_time = 'dinner' ) 
+GROUP  BY i_brand, 
+          i_brand_id, 
+          t_hour, 
+          t_minute 
+ORDER  BY ext_price DESC, 
+          i_brand_id; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_71_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 72
+
+start_time = time.time()
+catalog_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_sales")
+catalog_salesdf.createOrReplaceTempView("catalog_sales")
+catalog_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_returns")
+catalog_returnsdf.createOrReplaceTempView("catalog_returns")
+customer_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer_demographics")
+customer_demographicsdf.createOrReplaceTempView("customer_demographics")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+itemdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/item")
+itemdf.createOrReplaceTempView("item")
+household_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/household_demographics")
+household_demographicsdf.createOrReplaceTempView("household_demographics")
+promotiondf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/promotion")
+promotiondf.createOrReplaceTempView("promotion")
+inventorydf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/inventory")
+inventorydf.createOrReplaceTempView("inventory")
+warehousedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/warehouse")
+warehousedf.createOrReplaceTempView("warehouse")
+
+
+query = """
+
+SELECT i_item_desc, 
+               w_warehouse_name, 
+               d1.d_week_seq, 
+               Sum(CASE 
+                     WHEN p_promo_sk IS NULL THEN 1 
+                     ELSE 0 
+                   END) no_promo, 
+               Sum(CASE 
+                     WHEN p_promo_sk IS NOT NULL THEN 1 
+                     ELSE 0 
+                   END) promo, 
+               Count(*) total_cnt 
+FROM   catalog_sales
+       JOIN inventory 
+         ON ( cs_item_sk = inv_item_sk ) 
+       JOIN warehouse 
+         ON ( w_warehouse_sk = inv_warehouse_sk ) 
+       JOIN item 
+         ON ( i_item_sk = cs_item_sk ) 
+       JOIN customer_demographics 
+         ON ( cs_bill_cdemo_sk = cd_demo_sk ) 
+       JOIN household_demographics 
+         ON ( cs_bill_hdemo_sk = hd_demo_sk ) 
+       JOIN date_dim d1 
+         ON ( cs_sold_date_sk = d1.d_date_sk ) 
+       JOIN date_dim d2 
+         ON ( inv_date_sk = d2.d_date_sk ) 
+       JOIN date_dim d3 
+         ON ( cs_ship_date_sk = d3.d_date_sk ) 
+       LEFT OUTER JOIN promotion 
+                    ON ( cs_promo_sk = p_promo_sk ) 
+       LEFT OUTER JOIN catalog_returns 
+                    ON ( cr_item_sk = cs_item_sk 
+                         AND cr_order_number = cs_order_number ) 
+WHERE  d1.d_week_seq = d2.d_week_seq 
+       AND inv_quantity_on_hand < cs_quantity 
+       AND d3.d_date > d1.d_date + INTERVAL '5' day 
+       AND hd_buy_potential = '501-1000' 
+       AND d1.d_year = 2002 
+       AND cd_marital_status = 'M' 
+GROUP  BY i_item_desc, 
+          w_warehouse_name, 
+          d1.d_week_seq 
+ORDER  BY total_cnt DESC, 
+          i_item_desc, 
+          w_warehouse_name, 
+          d_week_seq; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_72_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 73
+
+start_time = time.time()
+storedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store")
+storedf.createOrReplaceTempView("store")
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+customerdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer")
+customerdf.createOrReplaceTempView("customer")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+household_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/household_demographics")
+household_demographicsdf.createOrReplaceTempView("household_demographics")
+
+
+query = """
+
+SELECT c_last_name, 
+       c_first_name, 
+       c_salutation, 
+       c_preferred_cust_flag, 
+       ss_ticket_number, 
+       cnt 
+FROM   (SELECT ss_ticket_number, 
+               ss_customer_sk, 
+               Count(*) cnt 
+        FROM   store_sales, 
+               date_dim, 
+               store, 
+               household_demographics 
+        WHERE  store_sales.ss_sold_date_sk = date_dim.d_date_sk 
+               AND store_sales.ss_store_sk = store.s_store_sk 
+               AND store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk 
+               AND date_dim.d_dom BETWEEN 1 AND 2 
+               AND ( household_demographics.hd_buy_potential = '>10000' 
+                      OR household_demographics.hd_buy_potential = '0-500' ) 
+               AND household_demographics.hd_vehicle_count > 0 
+               AND CASE 
+                     WHEN household_demographics.hd_vehicle_count > 0 THEN 
+                     household_demographics.hd_dep_count / 
+                     household_demographics.hd_vehicle_count 
+                     ELSE NULL 
+                   END > 1 
+               AND date_dim.d_year IN ( 2000, 2000 + 1, 2000 + 2 ) 
+               AND store.s_county IN ( 'Williamson County', 'Williamson County', 
+                                       'Williamson County', 
+                                                             'Williamson County' 
+                                     ) 
+        GROUP  BY ss_ticket_number, 
+                  ss_customer_sk) dj, 
+       customer 
+WHERE  ss_customer_sk = c_customer_sk 
+       AND cnt BETWEEN 1 AND 5 
+ORDER  BY cnt DESC, 
+          c_last_name ASC; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_73_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 74
+
+start_time = time.time()
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+customerdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer")
+customerdf.createOrReplaceTempView("customer")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+
+
+query = """
+
+WITH year_total 
+     AS (SELECT c_customer_id    customer_id, 
+                c_first_name     customer_first_name, 
+                c_last_name      customer_last_name, 
+                d_year           AS year1, 
+                Sum(ss_net_paid) year_total, 
+                's'              sale_type 
+         FROM   customer, 
+                store_sales, 
+                date_dim 
+         WHERE  c_customer_sk = ss_customer_sk 
+                AND ss_sold_date_sk = d_date_sk 
+                AND d_year IN ( 1999, 1999 + 1 ) 
+         GROUP  BY c_customer_id, 
+                   c_first_name, 
+                   c_last_name, 
+                   d_year 
+         UNION ALL 
+         SELECT c_customer_id    customer_id, 
+                c_first_name     customer_first_name, 
+                c_last_name      customer_last_name, 
+                d_year           AS year1, 
+                Sum(ws_net_paid) year_total, 
+                'w'              sale_type 
+         FROM   customer, 
+                web_sales, 
+                date_dim 
+         WHERE  c_customer_sk = ws_bill_customer_sk 
+                AND ws_sold_date_sk = d_date_sk 
+                AND d_year IN ( 1999, 1999 + 1 ) 
+         GROUP  BY c_customer_id, 
+                   c_first_name, 
+                   c_last_name, 
+                   d_year) 
+SELECT t_s_secyear.customer_id, 
+               t_s_secyear.customer_first_name, 
+               t_s_secyear.customer_last_name 
+FROM   year_total t_s_firstyear, 
+       year_total t_s_secyear, 
+       year_total t_w_firstyear, 
+       year_total t_w_secyear 
+WHERE  t_s_secyear.customer_id = t_s_firstyear.customer_id 
+       AND t_s_firstyear.customer_id = t_w_secyear.customer_id 
+       AND t_s_firstyear.customer_id = t_w_firstyear.customer_id 
+       AND t_s_firstyear.sale_type = 's' 
+       AND t_w_firstyear.sale_type = 'w' 
+       AND t_s_secyear.sale_type = 's' 
+       AND t_w_secyear.sale_type = 'w' 
+       AND t_s_firstyear.year1 = 1999 
+       AND t_s_secyear.year1 = 1999 + 1 
+       AND t_w_firstyear.year1 = 1999 
+       AND t_w_secyear.year1 = 1999 + 1 
+       AND t_s_firstyear.year_total > 0 
+       AND t_w_firstyear.year_total > 0 
+       AND CASE 
+             WHEN t_w_firstyear.year_total > 0 THEN t_w_secyear.year_total / 
+                                                    t_w_firstyear.year_total 
+             ELSE NULL 
+           END > CASE 
+                   WHEN t_s_firstyear.year_total > 0 THEN 
+                   t_s_secyear.year_total / 
+                   t_s_firstyear.year_total 
+                   ELSE NULL 
+                 END 
+ORDER  BY 1, 
+          2, 
+          3; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_74_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 75
+
+start_time = time.time()
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+store_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_returns")
+store_returnsdf.createOrReplaceTempView("store_returns")
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+web_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_returns")
+web_returnsdf.createOrReplaceTempView("web_returns")
+catalog_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_sales")
+catalog_salesdf.createOrReplaceTempView("catalog_sales")
+catalog_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_returns")
+catalog_returnsdf.createOrReplaceTempView("catalog_returns")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+itemdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/item")
+itemdf.createOrReplaceTempView("item")
+
+
+query = """
+
+WITH all_sales 
+     AS (SELECT d_year, 
+                i_brand_id, 
+                i_class_id, 
+                i_category_id, 
+                i_manufact_id, 
+                Sum(sales_cnt) AS sales_cnt, 
+                Sum(sales_amt) AS sales_amt 
+         FROM   (SELECT d_year, 
+                        i_brand_id, 
+                        i_class_id, 
+                        i_category_id, 
+                        i_manufact_id, 
+                        cs_quantity - COALESCE(cr_return_quantity, 0)        AS 
+                        sales_cnt, 
+                        cs_ext_sales_price - COALESCE(cr_return_amount, 0.0) AS 
+                        sales_amt 
+                 FROM   catalog_sales 
+                        JOIN item 
+                          ON i_item_sk = cs_item_sk 
+                        JOIN date_dim 
+                          ON d_date_sk = cs_sold_date_sk 
+                        LEFT JOIN catalog_returns 
+                               ON ( cs_order_number = cr_order_number 
+                                    AND cs_item_sk = cr_item_sk ) 
+                 WHERE  i_category = 'Men' 
+                 UNION ALL
+                 SELECT d_year, 
+                        i_brand_id, 
+                        i_class_id, 
+                        i_category_id, 
+                        i_manufact_id, 
+                        ss_quantity - COALESCE(sr_return_quantity, 0)     AS 
+                        sales_cnt, 
+                        ss_ext_sales_price - COALESCE(sr_return_amt, 0.0) AS 
+                        sales_amt 
+                 FROM   store_sales 
+                        JOIN item 
+                          ON i_item_sk = ss_item_sk 
+                        JOIN date_dim 
+                          ON d_date_sk = ss_sold_date_sk 
+                        LEFT JOIN store_returns 
+                               ON ( ss_ticket_number = sr_ticket_number 
+                                    AND ss_item_sk = sr_item_sk ) 
+                 WHERE  i_category = 'Men' 
+                 UNION ALL
+                 SELECT d_year, 
+                        i_brand_id, 
+                        i_class_id, 
+                        i_category_id, 
+                        i_manufact_id, 
+                        ws_quantity - COALESCE(wr_return_quantity, 0)     AS 
+                        sales_cnt, 
+                        ws_ext_sales_price - COALESCE(wr_return_amt, 0.0) AS 
+                        sales_amt 
+                 FROM   web_sales 
+                        JOIN item 
+                          ON i_item_sk = ws_item_sk 
+                        JOIN date_dim 
+                          ON d_date_sk = ws_sold_date_sk 
+                        LEFT JOIN web_returns 
+                               ON ( ws_order_number = wr_order_number 
+                                    AND ws_item_sk = wr_item_sk ) 
+                 WHERE  i_category = 'Men') sales_detail 
+         GROUP  BY d_year, 
+                   i_brand_id, 
+                   i_class_id, 
+                   i_category_id, 
+                   i_manufact_id) 
+SELECT prev_yr.d_year                        AS prev_year, 
+               curr_yr.d_year                        AS year1, 
+               curr_yr.i_brand_id, 
+               curr_yr.i_class_id, 
+               curr_yr.i_category_id, 
+               curr_yr.i_manufact_id, 
+               prev_yr.sales_cnt                     AS prev_yr_cnt, 
+               curr_yr.sales_cnt                     AS curr_yr_cnt, 
+               curr_yr.sales_cnt - prev_yr.sales_cnt AS sales_cnt_diff, 
+               curr_yr.sales_amt - prev_yr.sales_amt AS sales_amt_diff 
+FROM   all_sales curr_yr, 
+       all_sales prev_yr 
+WHERE  curr_yr.i_brand_id = prev_yr.i_brand_id 
+       AND curr_yr.i_class_id = prev_yr.i_class_id 
+       AND curr_yr.i_category_id = prev_yr.i_category_id 
+       AND curr_yr.i_manufact_id = prev_yr.i_manufact_id 
+       AND curr_yr.d_year = 2002 
+       AND prev_yr.d_year = 2002 - 1 
+       AND Cast(curr_yr.sales_cnt AS NUMERIC) / Cast(prev_yr.sales_cnt AS 
+                                                                NUMERIC) 
+           < 0.9 
+ORDER  BY sales_cnt_diff; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_75_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 76
+
+start_time = time.time()
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+catalog_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_sales")
+catalog_salesdf.createOrReplaceTempView("catalog_sales")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+itemdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/item")
+itemdf.createOrReplaceTempView("item")
+
+
+query = """
+
+SELECT channel, 
+               col_name, 
+               d_year, 
+               d_qoy, 
+               i_category, 
+               Count(*)             sales_cnt, 
+               Sum(ext_sales_price) sales_amt 
+FROM   (SELECT 'store'            AS channel, 
+               'ss_hdemo_sk'      col_name, 
+               d_year, 
+               d_qoy, 
+               i_category, 
+               ss_ext_sales_price ext_sales_price 
+        FROM   store_sales, 
+               item, 
+               date_dim 
+        WHERE  ss_hdemo_sk IS NULL 
+               AND ss_sold_date_sk = d_date_sk 
+               AND ss_item_sk = i_item_sk 
+        UNION ALL 
+        SELECT 'web'              AS channel, 
+               'ws_ship_hdemo_sk' col_name, 
+               d_year, 
+               d_qoy, 
+               i_category, 
+               ws_ext_sales_price ext_sales_price 
+        FROM   web_sales, 
+               item, 
+               date_dim 
+        WHERE  ws_ship_hdemo_sk IS NULL 
+               AND ws_sold_date_sk = d_date_sk 
+               AND ws_item_sk = i_item_sk 
+        UNION ALL 
+        SELECT 'catalog'          AS channel, 
+               'cs_warehouse_sk'  col_name, 
+               d_year, 
+               d_qoy, 
+               i_category, 
+               cs_ext_sales_price ext_sales_price 
+        FROM   catalog_sales, 
+               item, 
+               date_dim 
+        WHERE  cs_warehouse_sk IS NULL 
+               AND cs_sold_date_sk = d_date_sk 
+               AND cs_item_sk = i_item_sk) foo 
+GROUP  BY channel, 
+          col_name, 
+          d_year, 
+          d_qoy, 
+          i_category 
+ORDER  BY channel, 
+          col_name, 
+          d_year, 
+          d_qoy, 
+          i_category; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_76_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 77
+
+start_time = time.time()
+storedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store")
+storedf.createOrReplaceTempView("store")
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+store_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_returns")
+store_returnsdf.createOrReplaceTempView("store_returns")
+web_pagedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_page")
+web_pagedf.createOrReplaceTempView("web_page")
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+web_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_returns")
+web_returnsdf.createOrReplaceTempView("web_returns")
+catalog_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_sales")
+catalog_salesdf.createOrReplaceTempView("catalog_sales")
+catalog_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_returns")
+catalog_returnsdf.createOrReplaceTempView("catalog_returns")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+
+
+query = """
+
+WITH ss AS 
+( 
+         SELECT   s_store_sk, 
+                  Sum(ss_ext_sales_price) AS sales, 
+                  Sum(ss_net_profit)      AS profit 
+         FROM     store_sales, 
+                  date_dim, 
+                  store 
+         WHERE    ss_sold_date_sk = d_date_sk 
+         AND      d_date BETWEEN Cast('2001-08-16' AS DATE) AND      ( 
+                           Cast('2001-08-16' AS DATE) + INTERVAL '30' day) 
+         AND      ss_store_sk = s_store_sk 
+         GROUP BY s_store_sk) , sr AS 
+( 
+         SELECT   s_store_sk, 
+                  sum(sr_return_amt) AS returns1, 
+                  sum(sr_net_loss)   AS profit_loss 
+         FROM     store_returns, 
+                  date_dim, 
+                  store 
+         WHERE    sr_returned_date_sk = d_date_sk 
+         AND      d_date BETWEEN cast('2001-08-16' AS date) AND      ( 
+                           cast('2001-08-16' AS date) + INTERVAL '30' day) 
+         AND      sr_store_sk = s_store_sk 
+         GROUP BY s_store_sk), cs AS 
+( 
+         SELECT   cs_call_center_sk, 
+                  sum(cs_ext_sales_price) AS sales, 
+                  sum(cs_net_profit)      AS profit 
+         FROM     catalog_sales, 
+                  date_dim 
+         WHERE    cs_sold_date_sk = d_date_sk 
+         AND      d_date BETWEEN cast('2001-08-16' AS date) AND      ( 
+                           cast('2001-08-16' AS date) + INTERVAL '30' day) 
+         GROUP BY cs_call_center_sk ), cr AS 
+( 
+         SELECT   cr_call_center_sk, 
+                  sum(cr_return_amount) AS returns1, 
+                  sum(cr_net_loss)      AS profit_loss 
+         FROM     catalog_returns, 
+                  date_dim 
+         WHERE    cr_returned_date_sk = d_date_sk 
+         AND      d_date BETWEEN cast('2001-08-16' AS date) AND      ( 
+                           cast('2001-08-16' AS date) + INTERVAL '30' day) 
+         GROUP BY cr_call_center_sk ), ws AS 
+( 
+         SELECT   wp_web_page_sk, 
+                  sum(ws_ext_sales_price) AS sales, 
+                  sum(ws_net_profit)      AS profit 
+         FROM     web_sales, 
+                  date_dim, 
+                  web_page 
+         WHERE    ws_sold_date_sk = d_date_sk 
+         AND      d_date BETWEEN cast('2001-08-16' AS date) AND      ( 
+                           cast('2001-08-16' AS date) + INTERVAL '30' day) 
+         AND      ws_web_page_sk = wp_web_page_sk 
+         GROUP BY wp_web_page_sk), wr AS 
+( 
+         SELECT   wp_web_page_sk, 
+                  sum(wr_return_amt) AS returns1, 
+                  sum(wr_net_loss)   AS profit_loss 
+         FROM     web_returns, 
+                  date_dim, 
+                  web_page 
+         WHERE    wr_returned_date_sk = d_date_sk 
+         AND      d_date BETWEEN cast('2001-08-16' AS date) AND      ( 
+                           cast('2001-08-16' AS date) + INTERVAL '30' day) 
+         AND      wr_web_page_sk = wp_web_page_sk 
+         GROUP BY wp_web_page_sk) 
+SELECT
+         channel , 
+         id , 
+         sum(sales)   AS sales , 
+         sum(returns1) AS returns1 , 
+         sum(profit)  AS profit 
+FROM     ( 
+                   SELECT    'store channel' AS channel , 
+                             ss.s_store_sk   AS id , 
+                             sales , 
+                             COALESCE(returns1, 0)               AS returns1 , 
+                             (profit - COALESCE(profit_loss,0)) AS profit 
+                   FROM      ss 
+                   LEFT JOIN sr 
+                   ON        ss.s_store_sk = sr.s_store_sk 
+                   UNION ALL 
+                   SELECT 'catalog channel' AS channel , 
+                          cs_call_center_sk AS id , 
+                          sales , 
+                          returns1 , 
+                          (profit - profit_loss) AS profit 
+                   FROM   cs , 
+                          cr 
+                   UNION ALL 
+                   SELECT    'web channel'     AS channel , 
+                             ws.wp_web_page_sk AS id , 
+                             sales , 
+                             COALESCE(returns1, 0)                  returns1 , 
+                             (profit - COALESCE(profit_loss,0)) AS profit 
+                   FROM      ws 
+                   LEFT JOIN wr 
+                   ON        ws.wp_web_page_sk = wr.wp_web_page_sk ) x 
+GROUP BY rollup (channel, id) 
+ORDER BY channel , 
+         id ; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_77_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+## Query 78
+
+start_time = time.time()
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+store_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_returns")
+store_returnsdf.createOrReplaceTempView("store_returns")
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+web_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_returns")
+web_returnsdf.createOrReplaceTempView("web_returns")
+catalog_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_sales")
+catalog_salesdf.createOrReplaceTempView("catalog_sales")
+catalog_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_returns")
+catalog_returnsdf.createOrReplaceTempView("catalog_returns")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+
+
+query = """
+
+WITH ws 
+     AS (SELECT d_year                 AS ws_sold_year, 
+                ws_item_sk, 
+                ws_bill_customer_sk    ws_customer_sk, 
+                Sum(ws_quantity)       ws_qty, 
+                Sum(ws_wholesale_cost) ws_wc, 
+                Sum(ws_sales_price)    ws_sp 
+         FROM   web_sales 
+                LEFT JOIN web_returns 
+                       ON wr_order_number = ws_order_number 
+                          AND ws_item_sk = wr_item_sk 
+                JOIN date_dim 
+                  ON ws_sold_date_sk = d_date_sk 
+         WHERE  wr_order_number IS NULL 
+         GROUP  BY d_year, 
+                   ws_item_sk, 
+                   ws_bill_customer_sk), 
+     cs 
+     AS (SELECT d_year                 AS cs_sold_year, 
+                cs_item_sk, 
+                cs_bill_customer_sk    cs_customer_sk, 
+                Sum(cs_quantity)       cs_qty, 
+                Sum(cs_wholesale_cost) cs_wc, 
+                Sum(cs_sales_price)    cs_sp 
+         FROM   catalog_sales 
+                LEFT JOIN catalog_returns 
+                       ON cr_order_number = cs_order_number 
+                          AND cs_item_sk = cr_item_sk 
+                JOIN date_dim 
+                  ON cs_sold_date_sk = d_date_sk 
+         WHERE  cr_order_number IS NULL 
+         GROUP  BY d_year, 
+                   cs_item_sk, 
+                   cs_bill_customer_sk), 
+     ss 
+     AS (SELECT d_year                 AS ss_sold_year, 
+                ss_item_sk, 
+                ss_customer_sk, 
+                Sum(ss_quantity)       ss_qty, 
+                Sum(ss_wholesale_cost) ss_wc, 
+                Sum(ss_sales_price)    ss_sp 
+         FROM   store_sales 
+                LEFT JOIN store_returns 
+                       ON sr_ticket_number = ss_ticket_number 
+                          AND ss_item_sk = sr_item_sk 
+                JOIN date_dim 
+                  ON ss_sold_date_sk = d_date_sk 
+         WHERE  sr_ticket_number IS NULL 
+         GROUP  BY d_year, 
+                   ss_item_sk, 
+                   ss_customer_sk) 
+SELECT ss_item_sk, 
+               Round(ss_qty / ( COALESCE(ws_qty + cs_qty, 1) ), 2) ratio, 
+               ss_qty                                              store_qty, 
+               ss_wc 
+               store_wholesale_cost, 
+               ss_sp 
+               store_sales_price, 
+               COALESCE(ws_qty, 0) + COALESCE(cs_qty, 0) 
+               other_chan_qty, 
+               COALESCE(ws_wc, 0) + COALESCE(cs_wc, 0) 
+               other_chan_wholesale_cost, 
+               COALESCE(ws_sp, 0) + COALESCE(cs_sp, 0) 
+               other_chan_sales_price 
+FROM   ss 
+       LEFT JOIN ws 
+              ON ( ws_sold_year = ss_sold_year 
+                   AND ws_item_sk = ss_item_sk 
+                   AND ws_customer_sk = ss_customer_sk ) 
+       LEFT JOIN cs 
+              ON ( cs_sold_year = ss_sold_year 
+                   AND cs_item_sk = cs_item_sk 
+                   AND cs_customer_sk = ss_customer_sk ) 
+WHERE  COALESCE(ws_qty, 0) > 0 
+       AND COALESCE(cs_qty, 0) > 0 
+       AND ss_sold_year = 1999 
+ORDER  BY ss_item_sk, 
+          ss_qty DESC, 
+          ss_wc DESC, 
+          ss_sp DESC, 
+          other_chan_qty, 
+          other_chan_wholesale_cost, 
+          other_chan_sales_price, 
+          Round(ss_qty / ( COALESCE(ws_qty + cs_qty, 1) ), 2); 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_78_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 79
+
+start_time = time.time()
+storedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store")
+storedf.createOrReplaceTempView("store")
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+customerdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer")
+customerdf.createOrReplaceTempView("customer")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+household_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/household_demographics")
+household_demographicsdf.createOrReplaceTempView("household_demographics")
+
+
+query = """
+
+SELECT c_last_name, 
+               c_first_name, 
+               Substr(s_city, 1, 30), 
+               ss_ticket_number, 
+               amt, 
+               profit 
+FROM   (SELECT ss_ticket_number, 
+               ss_customer_sk, 
+               store.s_city, 
+               Sum(ss_coupon_amt) amt, 
+               Sum(ss_net_profit) profit 
+        FROM   store_sales, 
+               date_dim, 
+               store, 
+               household_demographics 
+        WHERE  store_sales.ss_sold_date_sk = date_dim.d_date_sk 
+               AND store_sales.ss_store_sk = store.s_store_sk 
+               AND store_sales.ss_hdemo_sk = household_demographics.hd_demo_sk 
+               AND ( household_demographics.hd_dep_count = 8 
+                      OR household_demographics.hd_vehicle_count > 4 ) 
+               AND date_dim.d_dow = 1 
+               AND date_dim.d_year IN ( 2000, 2000 + 1, 2000 + 2 ) 
+               AND store.s_number_employees BETWEEN 200 AND 295 
+        GROUP  BY ss_ticket_number, 
+                  ss_customer_sk, 
+                  ss_addr_sk, 
+                  store.s_city) ms, 
+       customer 
+WHERE  ss_customer_sk = c_customer_sk 
+ORDER  BY c_last_name, 
+          c_first_name, 
+          Substr(s_city, 1, 30), 
+          profit; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_79_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 80
+
+start_time = time.time()
+storedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store")
+storedf.createOrReplaceTempView("store")
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+store_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_returns")
+store_returnsdf.createOrReplaceTempView("store_returns")
+web_sitedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_site")
+web_sitedf.createOrReplaceTempView("web_site")
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+web_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_returns")
+web_returnsdf.createOrReplaceTempView("web_returns")
+catalog_pagedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_page")
+catalog_pagedf.createOrReplaceTempView("catalog_page")
+catalog_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_sales")
+catalog_salesdf.createOrReplaceTempView("catalog_sales")
+catalog_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_returns")
+catalog_returnsdf.createOrReplaceTempView("catalog_returns")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+itemdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/item")
+itemdf.createOrReplaceTempView("item")
+promotiondf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/promotion")
+promotiondf.createOrReplaceTempView("promotion")
+
+
+query = """
+
+WITH ssr AS 
+( 
+                SELECT          s_store_id                                    AS store_id, 
+                                Sum(ss_ext_sales_price)                       AS sales, 
+                                Sum(COALESCE(sr_return_amt, 0))               AS returns1, 
+                                Sum(ss_net_profit - COALESCE(sr_net_loss, 0)) AS profit 
+                FROM            store_sales 
+                LEFT OUTER JOIN store_returns 
+                ON              ( 
+                                                ss_item_sk = sr_item_sk 
+                                AND             ss_ticket_number = sr_ticket_number), 
+                                date_dim, 
+                                store, 
+                                item, 
+                                promotion 
+                WHERE           ss_sold_date_sk = d_date_sk 
+                AND             d_date BETWEEN Cast('2000-08-26' AS DATE) AND             ( 
+                                                Cast('2000-08-26' AS DATE) + INTERVAL '30' day) 
+                AND             ss_store_sk = s_store_sk 
+                AND             ss_item_sk = i_item_sk 
+                AND             i_current_price > 50 
+                AND             ss_promo_sk = p_promo_sk 
+                AND             p_channel_tv = 'N' 
+                GROUP BY        s_store_id) , csr AS 
+( 
+                SELECT          cp_catalog_page_id                            AS catalog_page_id, 
+                                sum(cs_ext_sales_price)                       AS sales, 
+                                sum(COALESCE(cr_return_amount, 0))            AS returns1, 
+                                sum(cs_net_profit - COALESCE(cr_net_loss, 0)) AS profit 
+                FROM            catalog_sales 
+                LEFT OUTER JOIN catalog_returns 
+                ON              ( 
+                                                cs_item_sk = cr_item_sk 
+                                AND             cs_order_number = cr_order_number), 
+                                date_dim, 
+                                catalog_page, 
+                                item, 
+                                promotion 
+                WHERE           cs_sold_date_sk = d_date_sk 
+                AND             d_date BETWEEN cast('2000-08-26' AS date) AND             ( 
+                                                cast('2000-08-26' AS date) + INTERVAL '30' day) 
+                AND             cs_catalog_page_sk = cp_catalog_page_sk 
+                AND             cs_item_sk = i_item_sk 
+                AND             i_current_price > 50 
+                AND             cs_promo_sk = p_promo_sk 
+                AND             p_channel_tv = 'N' 
+                GROUP BY        cp_catalog_page_id) , wsr AS 
+( 
+                SELECT          web_site_id, 
+                                sum(ws_ext_sales_price)                       AS sales, 
+                                sum(COALESCE(wr_return_amt, 0))               AS returns1, 
+                                sum(ws_net_profit - COALESCE(wr_net_loss, 0)) AS profit 
+                FROM            web_sales 
+                LEFT OUTER JOIN web_returns 
+                ON              ( 
+                                                ws_item_sk = wr_item_sk 
+                                AND             ws_order_number = wr_order_number), 
+                                date_dim, 
+                                web_site, 
+                                item, 
+                                promotion 
+                WHERE           ws_sold_date_sk = d_date_sk 
+                AND             d_date BETWEEN cast('2000-08-26' AS date) AND             ( 
+                                                cast('2000-08-26' AS date) + INTERVAL '30' day) 
+                AND             ws_web_site_sk = web_site_sk 
+                AND             ws_item_sk = i_item_sk 
+                AND             i_current_price > 50 
+                AND             ws_promo_sk = p_promo_sk 
+                AND             p_channel_tv = 'N' 
+                GROUP BY        web_site_id) 
+SELECT
+         channel , 
+         id , 
+         sum(sales)   AS sales , 
+         sum(returns1) AS returns1 , 
+         sum(profit)  AS profit 
+FROM     ( 
+                SELECT 'store channel' AS channel , 
+                       'store' 
+                              || store_id AS id , 
+                       sales , 
+                       returns1 , 
+                       profit 
+                FROM   ssr 
+                UNION ALL 
+                SELECT 'catalog channel' AS channel , 
+                       'catalog_page' 
+                              || catalog_page_id AS id , 
+                       sales , 
+                       returns1 , 
+                       profit 
+                FROM   csr 
+                UNION ALL 
+                SELECT 'web channel' AS channel , 
+                       'web_site' 
+                              || web_site_id AS id , 
+                       sales , 
+                       returns1 , 
+                       profit 
+                FROM   wsr ) x 
+GROUP BY rollup (channel, id) 
+ORDER BY channel , 
+         id ; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_80_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 81
+
+start_time = time.time()
+catalog_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_returns")
+catalog_returnsdf.createOrReplaceTempView("catalog_returns")
+customerdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer")
+customerdf.createOrReplaceTempView("customer")
+customer_addressdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer_address")
+customer_addressdf.createOrReplaceTempView("customer_address")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+
+
+query = """
+
+WITH customer_total_return 
+     AS (SELECT cr_returning_customer_sk   AS ctr_customer_sk, 
+                ca_state                   AS ctr_state, 
+                Sum(cr_return_amt_inc_tax) AS ctr_total_return 
+         FROM   catalog_returns, 
+                date_dim, 
+                customer_address 
+         WHERE  cr_returned_date_sk = d_date_sk 
+                AND d_year = 1999 
+                AND cr_returning_addr_sk = ca_address_sk 
+         GROUP  BY cr_returning_customer_sk, 
+                   ca_state) 
+SELECT c_customer_id, 
+               c_salutation, 
+               c_first_name, 
+               c_last_name, 
+               ca_street_number, 
+               ca_street_name, 
+               ca_street_type, 
+               ca_suite_number, 
+               ca_city, 
+               ca_county, 
+               ca_state, 
+               ca_zip, 
+               ca_country, 
+               ca_gmt_offset, 
+               ca_location_type, 
+               ctr_total_return 
+FROM   customer_total_return ctr1, 
+       customer_address, 
+       customer 
+WHERE  ctr1.ctr_total_return > (SELECT Avg(ctr_total_return) * 1.2 
+                                FROM   customer_total_return ctr2 
+                                WHERE  ctr1.ctr_state = ctr2.ctr_state) 
+       AND ca_address_sk = c_current_addr_sk 
+       AND ca_state = 'TX' 
+       AND ctr1.ctr_customer_sk = c_customer_sk 
+ORDER  BY c_customer_id, 
+          c_salutation, 
+          c_first_name, 
+          c_last_name, 
+          ca_street_number, 
+          ca_street_name, 
+          ca_street_type, 
+          ca_suite_number, 
+          ca_city, 
+          ca_county, 
+          ca_state, 
+          ca_zip, 
+          ca_country, 
+          ca_gmt_offset, 
+          ca_location_type, 
+          ctr_total_return; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_81_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+## Query 82
+
+start_time = time.time()
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+itemdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/item")
+itemdf.createOrReplaceTempView("item")
+inventorydf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/inventory")
+inventorydf.createOrReplaceTempView("inventory")
+
+
+query = """
+
+SELECT
+         i_item_id , 
+         i_item_desc , 
+         i_current_price 
+FROM     item, 
+         inventory, 
+         date_dim, 
+         store_sales 
+WHERE    i_current_price BETWEEN 63 AND      63+30 
+AND      inv_item_sk = i_item_sk 
+AND      d_date_sk=inv_date_sk 
+AND      d_date BETWEEN Cast('1998-04-27' AS DATE) AND      ( 
+                  Cast('1998-04-27' AS DATE) + INTERVAL '60' day) 
+AND      i_manufact_id IN (57,293,427,320) 
+AND      inv_quantity_on_hand BETWEEN 100 AND      500 
+AND      ss_item_sk = i_item_sk 
+GROUP BY i_item_id, 
+         i_item_desc, 
+         i_current_price 
+ORDER BY i_item_id ; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_82_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+## Query 83
+
+start_time = time.time()
+store_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_returns")
+store_returnsdf.createOrReplaceTempView("store_returns")
+web_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_returns")
+web_returnsdf.createOrReplaceTempView("web_returns")
+catalog_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_returns")
+catalog_returnsdf.createOrReplaceTempView("catalog_returns")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+itemdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/item")
+itemdf.createOrReplaceTempView("item")
+
+
+query = """
+
+WITH sr_items 
+     AS (SELECT i_item_id               item_id, 
+                Sum(sr_return_quantity) sr_item_qty 
+         FROM   store_returns, 
+                item, 
+                date_dim 
+         WHERE  sr_item_sk = i_item_sk 
+                AND d_date IN (SELECT d_date 
+                               FROM   date_dim 
+                               WHERE  d_week_seq IN (SELECT d_week_seq 
+                                                     FROM   date_dim 
+                                                     WHERE 
+                                      d_date IN ( '1999-06-30', 
+                                                  '1999-08-28', 
+                                                  '1999-11-18' 
+                                                ))) 
+                AND sr_returned_date_sk = d_date_sk 
+         GROUP  BY i_item_id), 
+     cr_items 
+     AS (SELECT i_item_id               item_id, 
+                Sum(cr_return_quantity) cr_item_qty 
+         FROM   catalog_returns, 
+                item, 
+                date_dim 
+         WHERE  cr_item_sk = i_item_sk 
+                AND d_date IN (SELECT d_date 
+                               FROM   date_dim 
+                               WHERE  d_week_seq IN (SELECT d_week_seq 
+                                                     FROM   date_dim 
+                                                     WHERE 
+                                      d_date IN ( '1999-06-30', 
+                                                  '1999-08-28', 
+                                                  '1999-11-18' 
+                                                ))) 
+                AND cr_returned_date_sk = d_date_sk 
+         GROUP  BY i_item_id), 
+     wr_items 
+     AS (SELECT i_item_id               item_id, 
+                Sum(wr_return_quantity) wr_item_qty 
+         FROM   web_returns, 
+                item, 
+                date_dim 
+         WHERE  wr_item_sk = i_item_sk 
+                AND d_date IN (SELECT d_date 
+                               FROM   date_dim 
+                               WHERE  d_week_seq IN (SELECT d_week_seq 
+                                                     FROM   date_dim 
+                                                     WHERE 
+                                      d_date IN ( '1999-06-30', 
+                                                  '1999-08-28', 
+                                                  '1999-11-18' 
+                                                ))) 
+                AND wr_returned_date_sk = d_date_sk 
+         GROUP  BY i_item_id) 
+SELECT sr_items.item_id, 
+               sr_item_qty, 
+               sr_item_qty / ( sr_item_qty + cr_item_qty + wr_item_qty ) / 3.0 * 
+               100 sr_dev, 
+               cr_item_qty, 
+               cr_item_qty / ( sr_item_qty + cr_item_qty + wr_item_qty ) / 3.0 * 
+               100 cr_dev, 
+               wr_item_qty, 
+               wr_item_qty / ( sr_item_qty + cr_item_qty + wr_item_qty ) / 3.0 * 
+               100 wr_dev, 
+               ( sr_item_qty + cr_item_qty + wr_item_qty ) / 3.0 
+               average 
+FROM   sr_items, 
+       cr_items, 
+       wr_items 
+WHERE  sr_items.item_id = cr_items.item_id 
+       AND sr_items.item_id = wr_items.item_id 
+ORDER  BY sr_items.item_id, 
+          sr_item_qty; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_83_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 84
+
+start_time = time.time()
+store_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_returns")
+store_returnsdf.createOrReplaceTempView("store_returns")
+customerdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer")
+customerdf.createOrReplaceTempView("customer")
+customer_addressdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer_address")
+customer_addressdf.createOrReplaceTempView("customer_address")
+customer_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer_demographics")
+customer_demographicsdf.createOrReplaceTempView("customer_demographics")
+household_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/household_demographics")
+household_demographicsdf.createOrReplaceTempView("household_demographics")
+income_banddf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/income_band")
+income_banddf.createOrReplaceTempView("income_band")
+
+
+query = """
+
+SELECT c_customer_id   AS customer_id, 
+               c_last_name 
+               || ', ' 
+               || c_first_name AS customername 
+FROM   customer, 
+       customer_address, 
+       customer_demographics, 
+       household_demographics, 
+       income_band, 
+       store_returns 
+WHERE  ca_city = 'Green Acres' 
+       AND c_current_addr_sk = ca_address_sk 
+       AND ib_lower_bound >= 54986 
+       AND ib_upper_bound <= 54986 + 50000 
+       AND ib_income_band_sk = hd_income_band_sk 
+       AND cd_demo_sk = c_current_cdemo_sk 
+       AND hd_demo_sk = c_current_hdemo_sk 
+       AND sr_cdemo_sk = cd_demo_sk 
+ORDER  BY c_customer_id; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_84_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+## Query 85
+
+start_time = time.time()
+web_pagedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_page")
+web_pagedf.createOrReplaceTempView("web_page")
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+web_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_returns")
+web_returnsdf.createOrReplaceTempView("web_returns")
+customer_addressdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer_address")
+customer_addressdf.createOrReplaceTempView("customer_address")
+customer_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer_demographics")
+customer_demographicsdf.createOrReplaceTempView("customer_demographics")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+reasondf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/reason")
+reasondf.createOrReplaceTempView("reason")
+
+
+query = """
+
+SELECT Substr(r_reason_desc, 1, 20), 
+               Avg(ws_quantity), 
+               Avg(wr_refunded_cash), 
+               Avg(wr_fee) 
+FROM   web_sales, 
+       web_returns, 
+       web_page, 
+       customer_demographics cd1, 
+       customer_demographics cd2, 
+       customer_address, 
+       date_dim, 
+       reason 
+WHERE  ws_web_page_sk = wp_web_page_sk 
+       AND ws_item_sk = wr_item_sk 
+       AND ws_order_number = wr_order_number 
+       AND ws_sold_date_sk = d_date_sk 
+       AND d_year = 2001 
+       AND cd1.cd_demo_sk = wr_refunded_cdemo_sk 
+       AND cd2.cd_demo_sk = wr_returning_cdemo_sk 
+       AND ca_address_sk = wr_refunded_addr_sk 
+       AND r_reason_sk = wr_reason_sk 
+       AND ( ( cd1.cd_marital_status = 'W' 
+               AND cd1.cd_marital_status = cd2.cd_marital_status 
+               AND cd1.cd_education_status = 'Primary' 
+               AND cd1.cd_education_status = cd2.cd_education_status 
+               AND ws_sales_price BETWEEN 100.00 AND 150.00 ) 
+              OR ( cd1.cd_marital_status = 'D' 
+                   AND cd1.cd_marital_status = cd2.cd_marital_status 
+                   AND cd1.cd_education_status = 'Secondary' 
+                   AND cd1.cd_education_status = cd2.cd_education_status 
+                   AND ws_sales_price BETWEEN 50.00 AND 100.00 ) 
+              OR ( cd1.cd_marital_status = 'M' 
+                   AND cd1.cd_marital_status = cd2.cd_marital_status 
+                   AND cd1.cd_education_status = 'Advanced Degree' 
+                   AND cd1.cd_education_status = cd2.cd_education_status 
+                   AND ws_sales_price BETWEEN 150.00 AND 200.00 ) ) 
+       AND ( ( ca_country = 'United States' 
+               AND ca_state IN ( 'KY', 'ME', 'IL' ) 
+               AND ws_net_profit BETWEEN 100 AND 200 ) 
+              OR ( ca_country = 'United States' 
+                   AND ca_state IN ( 'OK', 'NE', 'MN' ) 
+                   AND ws_net_profit BETWEEN 150 AND 300 ) 
+              OR ( ca_country = 'United States' 
+                   AND ca_state IN ( 'FL', 'WI', 'KS' ) 
+                   AND ws_net_profit BETWEEN 50 AND 250 ) ) 
+GROUP  BY r_reason_desc 
+ORDER  BY Substr(r_reason_desc, 1, 20), 
+          Avg(ws_quantity), 
+          Avg(wr_refunded_cash), 
+          Avg(wr_fee); 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_85_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 86
+
+start_time = time.time()
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+itemdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/item")
+itemdf.createOrReplaceTempView("item")
+
+
+query = """
+
+SELECT Sum(ws_net_paid)                         AS total_sum, 
+               i_category, 
+               i_class, 
+               Grouping(i_category) + Grouping(i_class) AS lochierarchy, 
+               Rank() 
+                 OVER ( 
+                   partition BY Grouping(i_category)+Grouping(i_class), CASE 
+                 WHEN Grouping( 
+                 i_class) = 0 THEN i_category END 
+                   ORDER BY Sum(ws_net_paid) DESC)      AS rank_within_parent 
+FROM   web_sales, 
+       date_dim d1, 
+       item 
+WHERE  d1.d_month_seq BETWEEN 1183 AND 1183 + 11 
+       AND d1.d_date_sk = ws_sold_date_sk 
+       AND i_item_sk = ws_item_sk 
+GROUP  BY rollup( i_category, i_class ) 
+ORDER  BY lochierarchy DESC, 
+          CASE 
+            WHEN lochierarchy = 0 THEN i_category 
+          END, 
+          rank_within_parent; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_86_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+## Query 88
+
+start_time = time.time()
+storedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store")
+storedf.createOrReplaceTempView("store")
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+household_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/household_demographics")
+household_demographicsdf.createOrReplaceTempView("household_demographics")
+time_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/time_dim")
+time_dimdf.createOrReplaceTempView("time_dim")
+
+
+query = """
+
+SELECT  *
+FROM
+ (SELECT count(*) h8_30_to_9
+ FROM 
+ store_sales, 
+ household_demographics , 
+ time_dim, 
+ store
+ where ss_sold_time_sk = time_dim.t_time_sk   
+     and ss_hdemo_sk = household_demographics.hd_demo_sk 
+     and ss_store_sk = s_store_sk
+     and time_dim.t_hour = 8
+     and time_dim.t_minute >= 30
+     and ((household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
+          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
+          (household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2)) 
+     and store.s_store_name = 'ese') s1,
+ (SELECT count(*) h9_to_9_30 
+ FROM 
+ store_sales, 
+ household_demographics , 
+ time_dim, 
+ store
+ where ss_sold_time_sk = time_dim.t_time_sk
+     and ss_hdemo_sk = household_demographics.hd_demo_sk
+     and ss_store_sk = s_store_sk 
+     and time_dim.t_hour = 9 
+     and time_dim.t_minute < 30
+     and ((household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
+          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
+          (household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2))
+     and store.s_store_name = 'ese') s2,
+ (SELECT count(*) h9_30_to_10 
+ FROM 
+ store_sales, 
+ household_demographics , 
+ time_dim, 
+ store
+ where ss_sold_time_sk = time_dim.t_time_sk
+     and ss_hdemo_sk = household_demographics.hd_demo_sk
+     and ss_store_sk = s_store_sk
+     and time_dim.t_hour = 9
+     and time_dim.t_minute >= 30
+     and ((household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
+          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
+          (household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2))
+     and store.s_store_name = 'ese') s3,
+ (SELECT count(*) h10_to_10_30
+ FROM 
+ store_sales, 
+ household_demographics , 
+ time_dim, 
+ store
+ where ss_sold_time_sk = time_dim.t_time_sk
+     and ss_hdemo_sk = household_demographics.hd_demo_sk
+     and ss_store_sk = s_store_sk
+     and time_dim.t_hour = 10 
+     and time_dim.t_minute < 30
+     and ((household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
+          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
+          (household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2))
+     and store.s_store_name = 'ese') s4,
+ (SELECT count(*) h10_30_to_11
+ FROM 
+ store_sales, 
+ household_demographics , 
+ time_dim, 
+ store
+ where ss_sold_time_sk = time_dim.t_time_sk
+     and ss_hdemo_sk = household_demographics.hd_demo_sk
+     and ss_store_sk = s_store_sk
+     and time_dim.t_hour = 10 
+     and time_dim.t_minute >= 30
+     and ((household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
+          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
+          (household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2))
+     and store.s_store_name = 'ese') s5,
+ (SELECT count(*) h11_to_11_30
+ FROM 
+ store_sales, 
+ household_demographics,
+ time_dim, 
+ store
+ where ss_sold_time_sk = time_dim.t_time_sk
+     and ss_hdemo_sk = household_demographics.hd_demo_sk
+     and ss_store_sk = s_store_sk 
+     and time_dim.t_hour = 11
+     and time_dim.t_minute < 30
+     and ((household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
+          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
+          (household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2))
+     and store.s_store_name = 'ese') s6,
+ (SELECT count(*) h11_30_to_12
+ FROM 
+ store_sales, 
+ household_demographics , 
+ time_dim, 
+ store
+ where ss_sold_time_sk = time_dim.t_time_sk
+     and ss_hdemo_sk = household_demographics.hd_demo_sk
+     and ss_store_sk = s_store_sk
+     and time_dim.t_hour = 11
+     and time_dim.t_minute >= 30
+     and ((household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
+          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
+          (household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2))
+     and store.s_store_name = 'ese') s7,
+ (SELECT count(*) h12_to_12_30
+ FROM 
+ store_sales, 
+ household_demographics , 
+ time_dim, 
+ store
+ where ss_sold_time_sk = time_dim.t_time_sk
+     and ss_hdemo_sk = household_demographics.hd_demo_sk
+     and ss_store_sk = s_store_sk
+     and time_dim.t_hour = 12
+     and time_dim.t_minute < 30
+     and ((household_demographics.hd_dep_count = -1 and household_demographics.hd_vehicle_count<=-1+2) or
+          (household_demographics.hd_dep_count = 2 and household_demographics.hd_vehicle_count<=2+2) or
+          (household_demographics.hd_dep_count = 3 and household_demographics.hd_vehicle_count<=3+2))
+     and store.s_store_name = 'ese') s8
+;
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_88_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+## Query 89
+
+start_time = time.time()
+storedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store")
+storedf.createOrReplaceTempView("store")
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+itemdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/item")
+itemdf.createOrReplaceTempView("item")
+
+
+query = """
+
+SELECT  * 
+FROM  (SELECT i_category, 
+              i_class, 
+              i_brand, 
+              s_store_name, 
+              s_company_name, 
+              d_moy, 
+              Sum(ss_sales_price) sum_sales, 
+              Avg(Sum(ss_sales_price)) 
+                OVER ( 
+                  partition BY i_category, i_brand, s_store_name, s_company_name 
+                ) 
+                                  avg_monthly_sales 
+       FROM   item, 
+              store_sales, 
+              date_dim, 
+              store 
+       WHERE  ss_item_sk = i_item_sk 
+              AND ss_sold_date_sk = d_date_sk 
+              AND ss_store_sk = s_store_sk 
+              AND d_year IN ( 2002 ) 
+              AND ( ( i_category IN ( 'Home', 'Men', 'Sports' ) 
+                      AND i_class IN ( 'paint', 'accessories', 'fitness' ) ) 
+                     OR ( i_category IN ( 'Shoes', 'Jewelry', 'Women' ) 
+                          AND i_class IN ( 'mens', 'pendants', 'swimwear' ) ) ) 
+       GROUP  BY i_category, 
+                 i_class, 
+                 i_brand, 
+                 s_store_name, 
+                 s_company_name, 
+                 d_moy) tmp1 
+WHERE  CASE 
+         WHEN ( avg_monthly_sales <> 0 ) THEN ( 
+         Abs(sum_sales - avg_monthly_sales) / avg_monthly_sales ) 
+         ELSE NULL 
+       END > 0.1 
+ORDER  BY sum_sales - avg_monthly_sales, 
+          s_store_name; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_89_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 90
+
+start_time = time.time()
+web_pagedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_page")
+web_pagedf.createOrReplaceTempView("web_page")
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+household_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/household_demographics")
+household_demographicsdf.createOrReplaceTempView("household_demographics")
+time_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/time_dim")
+time_dimdf.createOrReplaceTempView("time_dim")
+
+
+query = """
+
+SELECT Cast(amc AS NUMERIC) / Cast(pmc AS NUMERIC) 
+               am_pm_ratio 
+FROM   (SELECT Count(*) amc 
+        FROM   web_sales, 
+               household_demographics, 
+               time_dim, 
+               web_page 
+        WHERE  ws_sold_time_sk = time_dim.t_time_sk 
+               AND ws_ship_hdemo_sk = household_demographics.hd_demo_sk 
+               AND ws_web_page_sk = web_page.wp_web_page_sk 
+               AND time_dim.t_hour BETWEEN 12 AND 12 + 1 
+               AND household_demographics.hd_dep_count = 8 
+               AND web_page.wp_char_count BETWEEN 5000 AND 5200) at1, 
+       (SELECT Count(*) pmc 
+        FROM   web_sales, 
+               household_demographics, 
+               time_dim, 
+               web_page 
+        WHERE  ws_sold_time_sk = time_dim.t_time_sk 
+               AND ws_ship_hdemo_sk = household_demographics.hd_demo_sk 
+               AND ws_web_page_sk = web_page.wp_web_page_sk 
+               AND time_dim.t_hour BETWEEN 20 AND 20 + 1 
+               AND household_demographics.hd_dep_count = 8 
+               AND web_page.wp_char_count BETWEEN 5000 AND 5200) pt 
+ORDER  BY am_pm_ratio; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_90_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 91
+
+start_time = time.time()
+catalog_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_returns")
+catalog_returnsdf.createOrReplaceTempView("catalog_returns")
+customerdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer")
+customerdf.createOrReplaceTempView("customer")
+customer_addressdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer_address")
+customer_addressdf.createOrReplaceTempView("customer_address")
+customer_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer_demographics")
+customer_demographicsdf.createOrReplaceTempView("customer_demographics")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+household_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/household_demographics")
+household_demographicsdf.createOrReplaceTempView("household_demographics")
+call_centerdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/call_center")
+call_centerdf.createOrReplaceTempView("call_center")
+
+
+query = """
+
+SELECT cc_call_center_id Call_Center, 
+       cc_name           Call_Center_Name, 
+       cc_manager        Manager, 
+       Sum(cr_net_loss)  Returns_Loss 
+FROM   call_center, 
+       catalog_returns, 
+       date_dim, 
+       customer, 
+       customer_address, 
+       customer_demographics, 
+       household_demographics 
+WHERE  cr_call_center_sk = cc_call_center_sk 
+       AND cr_returned_date_sk = d_date_sk 
+       AND cr_returning_customer_sk = c_customer_sk 
+       AND cd_demo_sk = c_current_cdemo_sk 
+       AND hd_demo_sk = c_current_hdemo_sk 
+       AND ca_address_sk = c_current_addr_sk 
+       AND d_year = 1999 
+       AND d_moy = 12 
+       AND ( ( cd_marital_status = 'M' 
+               AND cd_education_status = 'Unknown' ) 
+              OR ( cd_marital_status = 'W' 
+                   AND cd_education_status = 'Advanced Degree' ) ) 
+       AND hd_buy_potential LIKE 'Unknown%' 
+       AND ca_gmt_offset = -7 
+GROUP  BY cc_call_center_id, 
+          cc_name, 
+          cc_manager, 
+          cd_marital_status, 
+          cd_education_status 
+ORDER  BY Sum(cr_net_loss) DESC; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_91_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 92
+
+start_time = time.time()
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+itemdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/item")
+itemdf.createOrReplaceTempView("item")
+
+
+query = """
+
+SELECT 
+         Sum(ws_ext_discount_amt) AS `Excess Discount Amount`
+FROM     web_sales , 
+         item , 
+         date_dim 
+WHERE    i_manufact_id = 718 
+AND      i_item_sk = ws_item_sk 
+AND      d_date BETWEEN '2002-03-29' AND      ( 
+                  Cast('2002-03-29' AS DATE) +  INTERVAL '90' day) 
+AND      d_date_sk = ws_sold_date_sk 
+AND      ws_ext_discount_amt > 
+         ( 
+                SELECT 1.3 * avg(ws_ext_discount_amt) 
+                FROM   web_sales , 
+                       date_dim 
+                WHERE  ws_item_sk = i_item_sk 
+                AND    d_date BETWEEN '2002-03-29' AND    ( 
+                              cast('2002-03-29' AS date) + INTERVAL '90' day) 
+                AND    d_date_sk = ws_sold_date_sk ) 
+ORDER BY sum(ws_ext_discount_amt) ; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_92_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+## Query 93
+
+start_time = time.time()
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+store_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_returns")
+store_returnsdf.createOrReplaceTempView("store_returns")
+reasondf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/reason")
+reasondf.createOrReplaceTempView("reason")
+
+
+query = """
+
+SELECT ss_customer_sk, 
+               Sum(act_sales) sumsales 
+FROM   (SELECT ss_item_sk, 
+               ss_ticket_number, 
+               ss_customer_sk, 
+               CASE 
+                 WHEN sr_return_quantity IS NOT NULL THEN 
+                 ( ss_quantity - sr_return_quantity ) * ss_sales_price 
+                 ELSE ( ss_quantity * ss_sales_price ) 
+               END act_sales 
+        FROM   store_sales 
+               LEFT OUTER JOIN store_returns 
+                            ON ( sr_item_sk = ss_item_sk 
+                                 AND sr_ticket_number = ss_ticket_number ), 
+               reason 
+        WHERE  sr_reason_sk = r_reason_sk 
+               AND r_reason_desc = 'reason 38') t 
+GROUP  BY ss_customer_sk 
+ORDER  BY sumsales, 
+          ss_customer_sk; 
+
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_93_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 94
+
+start_time = time.time()
+web_sitedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_site")
+web_sitedf.createOrReplaceTempView("web_site")
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+web_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_returns")
+web_returnsdf.createOrReplaceTempView("web_returns")
+customer_addressdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer_address")
+customer_addressdf.createOrReplaceTempView("customer_address")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+
+
+query = """
+
+SELECT 
+         Count(DISTINCT ws_order_number) AS `order count` , 
+         Sum(ws_ext_ship_cost)           AS `total shipping cost` , 
+         Sum(ws_net_profit)              AS `total net profit` 
+FROM     web_sales ws1 , 
+         date_dim , 
+         customer_address , 
+         web_site 
+WHERE    d_date BETWEEN '2000-3-01' AND      ( 
+                  Cast('2000-3-01' AS DATE) + INTERVAL '60' day) 
+AND      ws1.ws_ship_date_sk = d_date_sk 
+AND      ws1.ws_ship_addr_sk = ca_address_sk 
+AND      ca_state = 'MT' 
+AND      ws1.ws_web_site_sk = web_site_sk 
+AND      web_company_name = 'pri' 
+AND      EXISTS 
+         ( 
+                SELECT * 
+                FROM   web_sales ws2 
+                WHERE  ws1.ws_order_number = ws2.ws_order_number 
+                AND    ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk) 
+AND      NOT EXISTS 
+         ( 
+                SELECT * 
+                FROM   web_returns wr1 
+                WHERE  ws1.ws_order_number = wr1.wr_order_number) 
+ORDER BY count(DISTINCT ws_order_number) ; 
+
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_94_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 95
+
+start_time = time.time()
+web_sitedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_site")
+web_sitedf.createOrReplaceTempView("web_site")
+web_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_sales")
+web_salesdf.createOrReplaceTempView("web_sales")
+web_returnsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/web_returns")
+web_returnsdf.createOrReplaceTempView("web_returns")
+customer_addressdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/customer_address")
+customer_addressdf.createOrReplaceTempView("customer_address")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+
+
+query = """
+
+WITH ws_wh AS 
+( 
+       SELECT ws1.ws_order_number, 
+              ws1.ws_warehouse_sk wh1, 
+              ws2.ws_warehouse_sk wh2 
+       FROM   web_sales ws1, 
+              web_sales ws2 
+       WHERE  ws1.ws_order_number = ws2.ws_order_number 
+       AND    ws1.ws_warehouse_sk <> ws2.ws_warehouse_sk) 
+SELECT 
+         Count(DISTINCT ws_order_number) AS `order count` , 
+         Sum(ws_ext_ship_cost)           AS `total shipping cost` , 
+         Sum(ws_net_profit)              AS `total net profit` 
+FROM     web_sales ws1 , 
+         date_dim , 
+         customer_address , 
+         web_site 
+WHERE    d_date BETWEEN '2000-4-01' AND      ( 
+                  Cast('2000-4-01' AS DATE) + INTERVAL '60' day) 
+AND      ws1.ws_ship_date_sk = d_date_sk 
+AND      ws1.ws_ship_addr_sk = ca_address_sk 
+AND      ca_state = 'IN' 
+AND      ws1.ws_web_site_sk = web_site_sk 
+AND      web_company_name = 'pri' 
+AND      ws1.ws_order_number IN 
+         ( 
+                SELECT ws_order_number 
+                FROM   ws_wh) 
+AND      ws1.ws_order_number IN 
+         ( 
+                SELECT wr_order_number 
+                FROM   web_returns, 
+                       ws_wh 
+                WHERE  wr_order_number = ws_wh.ws_order_number) 
+ORDER BY count(DISTINCT ws_order_number) ; 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_95_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 96
+
+start_time = time.time()
+storedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store")
+storedf.createOrReplaceTempView("store")
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+household_demographicsdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/household_demographics")
+household_demographicsdf.createOrReplaceTempView("household_demographics")
+time_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/time_dim")
+time_dimdf.createOrReplaceTempView("time_dim")
+
+
+query = """
+
+SELECT Count(*) 
+FROM   store_sales, 
+       household_demographics, 
+       time_dim, 
+       store 
+WHERE  ss_sold_time_sk = time_dim.t_time_sk 
+       AND ss_hdemo_sk = household_demographics.hd_demo_sk 
+       AND ss_store_sk = s_store_sk 
+       AND time_dim.t_hour = 15 
+       AND time_dim.t_minute >= 30 
+       AND household_demographics.hd_dep_count = 7 
+       AND store.s_store_name = 'ese' 
+ORDER  BY Count(*); 
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_96_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+## Query 97
+
+start_time = time.time()
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+catalog_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_sales")
+catalog_salesdf.createOrReplaceTempView("catalog_sales")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+
+
+query = """
+
+WITH ssci as (
+SELECT ss_customer_sk customer_sk
+      ,ss_item_sk item_sk
+FROM 
+store_sales,
+date_dim
+WHERE ss_sold_date_sk = d_date_sk
+  and d_month_seq between 1212 and 1212 + 11
+GROUP BY ss_customer_sk
+        ,ss_item_sk),
+csci as(
+ SELECT cs_bill_customer_sk customer_sk
+      ,cs_item_sk item_sk
+FROM 
+catalog_sales,
+date_dim
+WHERE cs_sold_date_sk = d_date_sk
+  and d_month_seq between 1212 and 1212 + 11
+GROUP BY cs_bill_customer_sk
+        ,cs_item_sk)
+ SELECT  sum(case when ssci.customer_sk is not null and csci.customer_sk is null then 1 else 0 end) store_only
+      ,sum(case when ssci.customer_sk is null and csci.customer_sk is not null then 1 else 0 end) catalog_only
+      ,sum(case when ssci.customer_sk is not null and csci.customer_sk is not null then 1 else 0 end) store_and_catalog
+FROM ssci full outer join csci on (ssci.customer_sk=csci.customer_sk
+                               and ssci.item_sk = csci.item_sk);
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_97_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 98
+
+start_time = time.time()
+store_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/store_sales")
+store_salesdf.createOrReplaceTempView("store_sales")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+itemdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/item")
+itemdf.createOrReplaceTempView("item")
+
+
+query = """
+
+SELECT i_item_id
+      ,i_item_desc 
+      ,i_category 
+      ,i_class 
+      ,i_current_price
+      ,sum(ss_ext_sales_price) as itemrevenue 
+      ,sum(ss_ext_sales_price)*100/sum(sum(ss_ext_sales_price)) over
+          (partition by i_class) as revenueratio
+FROM   
+       store_sales
+       ,item 
+       ,date_dim
+WHERE 
+       ss_item_sk = i_item_sk 
+       and i_category in ('Jewelry', 'Sports', 'Books')
+       and ss_sold_date_sk = d_date_sk
+       and d_date between cast('2001-01-12' as date) 
+                            and (cast('2001-01-12' as date) + 30)
+GROUP BY 
+       i_item_id
+        ,i_item_desc 
+        ,i_category
+        ,i_class
+        ,i_current_price
+ORDER BY 
+       i_category
+        ,i_class
+        ,i_item_id
+        ,i_item_desc
+        ,revenueratio;
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_98_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
+
+
+
+
+
+
+
+## Query 99
+
+start_time = time.time()
+catalog_salesdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/catalog_sales")
+catalog_salesdf.createOrReplaceTempView("catalog_sales")
+date_dimdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/date_dim")
+date_dimdf.createOrReplaceTempView("date_dim")
+call_centerdf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/call_center")
+call_centerdf.createOrReplaceTempView("call_center")
+warehousedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/warehouse")
+warehousedf.createOrReplaceTempView("warehouse")
+ship_modedf = spark.read.parquet("gs://benchmarking-source/TPCDS/1TB/ship_mode")
+ship_modedf.createOrReplaceTempView("ship_mode")
+
+
+query = """
+
+SELECT  
+   substr(w_warehouse_name,1,20)
+  ,sm_type
+  ,cc_name
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk <= 30 ) then 1 else 0 end)  as `30 days` 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 30) and 
+                 (cs_ship_date_sk - cs_sold_date_sk <= 60) then 1 else 0 end )  as `31-60 days` 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 60) and 
+                 (cs_ship_date_sk - cs_sold_date_sk <= 90) then 1 else 0 end)  as `61-90 days` 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk > 90) and
+                 (cs_ship_date_sk - cs_sold_date_sk <= 120) then 1 else 0 end)  as `91-120 days` 
+  ,sum(case when (cs_ship_date_sk - cs_sold_date_sk  > 120) then 1 else 0 end)  as `>120 days` 
+FROM
+   catalog_sales
+  ,warehouse
+  ,ship_mode
+  ,call_center
+  ,date_dim
+WHERE
+    d_month_seq between 1212 and 1212 + 11
+and cs_ship_date_sk   = d_date_sk
+and cs_warehouse_sk   = w_warehouse_sk
+and cs_ship_mode_sk   = sm_ship_mode_sk
+and cs_call_center_sk = cc_call_center_sk
+GROUP BY
+   w_warehouse_name
+  ,sm_type
+  ,cc_name
+ORDER BY w_warehouse_name
+        ,sm_type
+        ,cc_name;
+
+"""
+
+result_df = spark.sql(query)
+
+for field in result_df.schema.fields:
+    if isinstance(field.dataType, DecimalType):
+        result_df = result_df.withColumn(field.name, col(field.name).cast(DecimalType(38, 9)))
+
+result_df.write.parquet("gs://benchmarking-source/output_folder/1TB/query_99_spark_gcs_result")
+
+end_time = time.time()
+print("_______________")
+print("Execution time:"+str(end_time-start_time))
+
+
+
+
+
